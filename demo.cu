@@ -11,10 +11,10 @@
 
 // CUDA kernel function to integrate a TSDF voxel volume given depth images
 __global__
-void Integrate(float * cam_K, float * cam2base, float * depth_im,
+void Integrate(float * cam_K, float * cam2base,  float * color_im, float * depth_im,
                int im_height, int im_width, int voxel_grid_dim_x, int voxel_grid_dim_y, int voxel_grid_dim_z,
                float voxel_grid_origin_x, float voxel_grid_origin_y, float voxel_grid_origin_z, float voxel_size, float trunc_margin,
-               float * voxel_grid_TSDF, float * voxel_grid_weight) {
+               float * voxel_grid_TSDF, float * voxel_grid_weight,  int * voxel_grid_color) {
 
   int pt_grid_z = blockIdx.x;
   int pt_grid_y = threadIdx.x;
@@ -60,6 +60,10 @@ void Integrate(float * cam_K, float * cam2base, float * depth_im,
     float weight_new = weight_old + 1.0f;
     voxel_grid_weight[volume_idx] = weight_new;
     voxel_grid_TSDF[volume_idx] = (voxel_grid_TSDF[volume_idx] * weight_old + dist) / weight_new;
+
+    voxel_grid_color[volume_idx * 3] = color_im[(pt_pix_y * im_width + pt_pix_x) * 3];
+    voxel_grid_color[volume_idx * 3 + 1] = color_im[(pt_pix_y * im_width + pt_pix_x) * 3 + 1];
+    voxel_grid_color[volume_idx * 3 + 2] = color_im[(pt_pix_y * im_width + pt_pix_x) * 3 + 2];
   }
 }
 
@@ -82,6 +86,7 @@ int main(int argc, char * argv[]) {
   float cam2world[4 * 4];
   int im_width = 640;
   int im_height = 480;
+  float color_im[im_height * im_width * 3];
   float depth_im[im_height * im_width];
 
   // Voxel grid parameters (change these to change voxel grid resolution, etc.)
@@ -126,25 +131,32 @@ int main(int argc, char * argv[]) {
   // Initialize voxel grid
   float * voxel_grid_TSDF = new float[voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z];
   float * voxel_grid_weight = new float[voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z];
+  int * voxel_grid_color = new int[voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * 3];
   for (int i = 0; i < voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z; ++i)
     voxel_grid_TSDF[i] = 1.0f;
   memset(voxel_grid_weight, 0, sizeof(float) * voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z);
+  memset(voxel_grid_color, 0, sizeof(int) * voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z);
 
   // Load variables to GPU memory
   float * gpu_voxel_grid_TSDF;
   float * gpu_voxel_grid_weight;
+  int * gpu_voxel_grid_color;
   cudaMalloc(&gpu_voxel_grid_TSDF, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * sizeof(float));
   cudaMalloc(&gpu_voxel_grid_weight, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * sizeof(float));
+  cudaMalloc(&gpu_voxel_grid_color, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * 3 * sizeof(int));
   checkCUDA(__LINE__, cudaGetLastError());
   cudaMemcpy(gpu_voxel_grid_TSDF, voxel_grid_TSDF, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * sizeof(float), cudaMemcpyHostToDevice);
   cudaMemcpy(gpu_voxel_grid_weight, voxel_grid_weight, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_voxel_grid_color, voxel_grid_color, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * sizeof(int), cudaMemcpyHostToDevice);
   checkCUDA(__LINE__, cudaGetLastError());
   float * gpu_cam_K;
   float * gpu_cam2base;
+  float * gpu_color_im;
   float * gpu_depth_im;
   cudaMalloc(&gpu_cam_K, 3 * 3 * sizeof(float));
   cudaMemcpy(gpu_cam_K, cam_K, 3 * 3 * sizeof(float), cudaMemcpyHostToDevice);
   cudaMalloc(&gpu_cam2base, 4 * 4 * sizeof(float));
+  cudaMalloc(&gpu_color_im, im_height * im_width * 3 * sizeof(int));
   cudaMalloc(&gpu_depth_im, im_height * im_width * sizeof(float));
   checkCUDA(__LINE__, cudaGetLastError());
 
@@ -154,6 +166,19 @@ int main(int argc, char * argv[]) {
     std::ostringstream curr_frame_prefix;
     curr_frame_prefix << std::setw(6) << std::setfill('0') << frame_idx;
 
+    // // Read current frame color
+    std::string color_im_file = data_path + "/frame-" + curr_frame_prefix.str() + ".color.png";
+    ReadColor(color_im_file, im_height, im_width, color_im);
+    // if (frame_idx == first_frame_idx){
+    //   for (int w = 0 ; w < im_width; w++){
+    //     for (int h = 0 ; h < im_height; h++){
+    //       int color_r = color_im[(h * im_height + w)* 3];
+    //       int color_g = color_im[(h * im_height + w)* 3 + 1];
+    //       int color_b = color_im[(h * im_height + w)* 3 + 2];
+    //       printf("(r, g ,b) = (%d, %d, %d)\n", color_r, color_g, color_b);
+    //     }
+    //   }
+    // }
     // // Read current frame depth
     std::string depth_im_file = data_path + "/frame-" + curr_frame_prefix.str() + ".depth.png";
     ReadDepth(depth_im_file, im_height, im_width, depth_im);
@@ -167,27 +192,30 @@ int main(int argc, char * argv[]) {
     multiply_matrix(base2world_inv, cam2world, cam2base);
 
     cudaMemcpy(gpu_cam2base, cam2base, 4 * 4 * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(gpu_color_im, color_im, im_height * im_width * 3 * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(gpu_depth_im, depth_im, im_height * im_width * sizeof(float), cudaMemcpyHostToDevice);
     checkCUDA(__LINE__, cudaGetLastError());
 
     std::cout << "Fusing: " << depth_im_file << std::endl;
 
-    Integrate <<< voxel_grid_dim_z, voxel_grid_dim_y >>>(gpu_cam_K, gpu_cam2base, gpu_depth_im,
+    Integrate <<< voxel_grid_dim_z, voxel_grid_dim_y >>>(gpu_cam_K, gpu_cam2base, gpu_color_im, gpu_depth_im,
                                                          im_height, im_width, voxel_grid_dim_x, voxel_grid_dim_y, voxel_grid_dim_z,
                                                          voxel_grid_origin_x, voxel_grid_origin_y, voxel_grid_origin_z, voxel_size, trunc_margin,
-                                                         gpu_voxel_grid_TSDF, gpu_voxel_grid_weight);
+                                                         gpu_voxel_grid_TSDF, gpu_voxel_grid_weight,
+                                                         gpu_voxel_grid_color);
   }
 
   // Load TSDF voxel grid from GPU to CPU memory
   cudaMemcpy(voxel_grid_TSDF, gpu_voxel_grid_TSDF, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * sizeof(float), cudaMemcpyDeviceToHost);
   cudaMemcpy(voxel_grid_weight, gpu_voxel_grid_weight, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(voxel_grid_color, gpu_voxel_grid_color, voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z * 3 * sizeof(int), cudaMemcpyDeviceToHost);
   checkCUDA(__LINE__, cudaGetLastError());
 
   // Compute surface points from TSDF voxel grid and save to point cloud .ply file
   std::cout << "Saving surface point cloud (tsdf.ply)..." << std::endl;
-  SaveVoxelGrid2SurfacePointCloud("tsdf.ply", voxel_grid_dim_x, voxel_grid_dim_y, voxel_grid_dim_z, 
+  SaveVoxelGrid2SurfacePointCloud("tsdf.ply", voxel_grid_dim_x, voxel_grid_dim_y, voxel_grid_dim_z,
                                   voxel_size, voxel_grid_origin_x, voxel_grid_origin_y, voxel_grid_origin_z,
-                                  voxel_grid_TSDF, voxel_grid_weight, 0.2f, 1.0f);
+                                  voxel_grid_TSDF, voxel_grid_weight, voxel_grid_color, 0.2f, 1.0f);
 
   // Save TSDF voxel grid and its parameters to disk as binary file (float array)
   std::cout << "Saving TSDF voxel grid values to disk (tsdf.bin)..." << std::endl;

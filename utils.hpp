@@ -2,13 +2,14 @@
 // Author: Andy Zeng, Princeton University, 2016
 // ---------------------------------------------------------
 
+#include <stdio.h>
 #include <vector>
 #include <opencv2/opencv.hpp>
 
 // Compute surface points from TSDF voxel grid and save points to point cloud file
 void SaveVoxelGrid2SurfacePointCloud(const std::string &file_name, int voxel_grid_dim_x, int voxel_grid_dim_y, int voxel_grid_dim_z,
                                      float voxel_size, float voxel_grid_origin_x, float voxel_grid_origin_y, float voxel_grid_origin_z,
-                                     float * voxel_grid_TSDF, float * voxel_grid_weight,
+                                     float * voxel_grid_TSDF, float * voxel_grid_weight, int * voxel_grid_color,
                                      float tsdf_thresh, float weight_thresh) {
 
   // Count total number of points in point cloud
@@ -25,6 +26,10 @@ void SaveVoxelGrid2SurfacePointCloud(const std::string &file_name, int voxel_gri
   fprintf(fp, "property float x\n");
   fprintf(fp, "property float y\n");
   fprintf(fp, "property float z\n");
+  fprintf(fp, "property uchar red\n");
+  fprintf(fp, "property uchar green\n");
+  fprintf(fp, "property uchar blue\n");
+  fprintf(fp, "property uchar alpha\n");
   fprintf(fp, "end_header\n");
 
   // Create point cloud content for ply file
@@ -32,7 +37,11 @@ void SaveVoxelGrid2SurfacePointCloud(const std::string &file_name, int voxel_gri
 
     // If TSDF value of voxel is less than some threshold, add voxel coordinates to point cloud
     if (std::abs(voxel_grid_TSDF[i]) < tsdf_thresh && voxel_grid_weight[i] > weight_thresh) {
-
+      unsigned char color_r = (unsigned char) voxel_grid_color[i * 3];
+      unsigned char color_g = (unsigned char) voxel_grid_color[i * 3 + 1];
+      unsigned char color_b = (unsigned char) voxel_grid_color[i * 3 + 2];
+      unsigned char color_a = 1;
+      // printf("(r, g ,b) = (%d, %d, %d)\n", color_r, color_g, color_b);
       // Compute voxel indices in int for higher positive number range
       int z = floor(i / (voxel_grid_dim_x * voxel_grid_dim_y));
       int y = floor((i - (z * voxel_grid_dim_x * voxel_grid_dim_y)) / voxel_grid_dim_x);
@@ -45,6 +54,10 @@ void SaveVoxelGrid2SurfacePointCloud(const std::string &file_name, int voxel_gri
       fwrite(&pt_base_x, sizeof(float), 1, fp);
       fwrite(&pt_base_y, sizeof(float), 1, fp);
       fwrite(&pt_base_z, sizeof(float), 1, fp);
+      fwrite(&color_r, sizeof(unsigned char), 1, fp);
+      fwrite(&color_g, sizeof(unsigned char), 1, fp);
+      fwrite(&color_b, sizeof(unsigned char), 1, fp);
+      fwrite(&color_a, sizeof(unsigned char), 1, fp);
     }
   }
   fclose(fp);
@@ -62,6 +75,22 @@ std::vector<float> LoadMatrixFromFile(std::string filename, int M, int N) {
   }
   fclose(fp);
   return matrix;
+}
+
+// Read a depth image with size H x W and save the color values (in RGB) into a float array (in row-major order)
+void ReadColor(std::string filename, int H, int W, float * color) {
+  cv::Mat color_mat = cv::imread(filename);
+  if (color_mat.empty()) {
+    std::cout << "Error: depth image file not read!" << std::endl;
+    cv::waitKey(0);
+  }
+  for (int r = 0; r < H; ++r)
+    for (int c = 0; c < W; ++c) {
+      // bgr -> rgb
+      color[(r * W + c) * 3] = (float)(color_mat.data[(r * W + c) * 3 + 2]);
+      color[(r * W + c) * 3 + 1] = (float)(color_mat.data[(r * W + c) * 3 + 1]);
+      color[(r * W + c) * 3 + 2] = (float)(color_mat.data[(r * W + c) * 3 + 0]);
+    }
 }
 
 // Read a depth image with size H x W and save the depth values (in meters) into a float array (in row-major order)
