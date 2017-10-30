@@ -94,12 +94,13 @@ def main():
     colors = tsdf_color[verts_idx[:, 0], verts_idx[:, 1], verts_idx[:, 2], :]
     del tsdf_color
     gc.collect()
+    verts[:, 2] = - verts[:, 2]
     verts = (voxel_grid_origin[np.newaxis, :] + verts * voxel_size)
     print "vertices color num : {}".format(len(colors))
     print "vertices num : {}".format(len(verts))
     print "faces num : {}".format(len(faces))
     print "saving ply mesh"
-    save_ply('mesh.ply', verts_idx, colors=colors, faces=faces)
+    save_ply('mesh.ply', verts, colors=colors, faces=faces)
 
 if __name__ =='__main__':
     main()
