@@ -236,7 +236,17 @@ int main(int argc, char * argv[]) {
     outFile.write((char*)&voxel_grid_TSDF[i], sizeof(float));
   outFile.close();
 
+  std::cout << "Saving TSDF voxel grid color values to disk (tsdf_color.bin)..." << std::endl;
+  std::string voxel_grid_color_saveto_path = "tsdf_color.bin";
+  std::ofstream outFileColor(voxel_grid_color_saveto_path, std::ios::binary | std::ios::out);
+  for (int i = 0; i < voxel_grid_dim_x * voxel_grid_dim_y * voxel_grid_dim_z; ++i){
+    unsigned char color_r = (unsigned char) voxel_grid_color[i * 3];
+    unsigned char color_g = (unsigned char) voxel_grid_color[i * 3 + 1];
+    unsigned char color_b = (unsigned char) voxel_grid_color[i * 3 + 2];
+    outFileColor.write((char*)&color_r, sizeof(unsigned char));
+    outFileColor.write((char*)&color_g, sizeof(unsigned char));
+    outFileColor.write((char*)&color_b, sizeof(unsigned char));
+  }
+  outFileColor.close();
   return 0;
 }
-
-

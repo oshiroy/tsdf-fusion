@@ -66,49 +66,40 @@ def save_ply(path, pts, colors=np.array([]), faces=np.array([])):
 
 def main():
     ## Load TSDF voxel grid from binary file
-    voxelGridDimX = 500;
-    voxelGridDimY = 500;
-    voxelGridDimZ = 500;
     fid = open('tsdf.bin', 'rb')
     buf = fid.read()
     fid.close()
     info = np.fromstring(buf[0:4*8], np.float32)
-    print info
+    voxelGridDimX = int(info[0])
+    voxelGridDimY = int(info[1])
+    voxelGridDimZ = int(info[2])
+    voxel_grid_origin = info[3:6]
+    voxel_size = info[6]
 
     tsdf = np.fromstring(buf[4*8:], np.float32)
     tsdf = tsdf.reshape(voxelGridDimX, voxelGridDimY, voxelGridDimZ)
-    print "marching cube"
-    # verts, faces = measure.marching_cubes_classic(tsdf, 0, spacing=(0.1, 0.1, 0.1))
-    # del tsdf
-    # gc.collect()
+    print "executing marching cube"
+    verts, faces = measure.marching_cubes(tsdf, 0)
     # np.save('verts.npy', verts)
     # np.save('faces.npy', faces)
-    verts = np.load('verts.npy')
-    faces = np.load('faces.npy')
+    # verts = np.load('verts.npy')
+    # faces = np.load('faces.npy')
     fid_color = open('tsdf_color.bin', 'rb')
     buf_color = fid_color.read()
     fid_color.close()
+
     tsdf_color = np.fromstring(buf_color, np.uint8)
     tsdf_color = tsdf_color.reshape(voxelGridDimX, voxelGridDimY, voxelGridDimZ, 3)
-    print "tsdf color shape : {}".format(tsdf_color.shape)
     verts_idx = np.round(verts).astype(np.int32)
-    # print np.round(verts)
     colors = tsdf_color[verts_idx[:, 0], verts_idx[:, 1], verts_idx[:, 2], :]
-
-    color_idx = np.asarray(np.where(tsdf < 0.2)).T
-    print color_idx.shape
-    # colors = tsdf_color[color_idx[indices, 0], color_idx[indices, 0], color_idx[indices, 0], :]
-    print colors.shape
-    print colors
-    # tmp_colors = tsdf_color[color_idx[:, 0], color_idx[:, 1], color_idx[:, 2], :]
     del tsdf_color
     gc.collect()
-    verts = info[np.newaxis, [3,4,5]] + verts * info[6]
+    verts = (voxel_grid_origin[np.newaxis, :] + verts * voxel_size)
     print "vertices color num : {}".format(len(colors))
     print "vertices num : {}".format(len(verts))
     print "faces num : {}".format(len(faces))
     print "saving ply mesh"
-    save_ply('mesh.ply', verts, colors=colors, faces=faces)
+    save_ply('mesh.ply', verts_idx, colors=colors, faces=faces)
 
 if __name__ =='__main__':
     main()
